@@ -55,6 +55,9 @@ public class TracingView extends View {
     // Adjust this value based on desired leniency.
     private static final float FEEDBACK_DISTANCE_THRESHOLD = 30; // Max distance in pixels
 
+    // New: Completeness threshold for correctness check (e.g., 0.95 means 95% of template must be covered)
+    private static final float COMPLETENESS_THRESHOLD = 0.95f; // User must trace at least 95% of the template's length
+
     // Dimensions of the view after layout
     private int viewWidth, viewHeight;
 
@@ -592,6 +595,7 @@ public class TracingView extends View {
      * Evaluates the correctness of a completed user stroke against the template path.
      * This method iterates through points on the user's stroke and checks if each point
      * is within the FEEDBACK_DISTANCE_THRESHOLD of the template path.
+     * It also checks if a sufficient portion of the template path has been covered.
      *
      * @param userStrokePath The Path object representing the user's completed stroke.
      * @return True if the stroke is considered correct, false otherwise.
@@ -605,27 +609,37 @@ public class TracingView extends View {
         float[] userCoords = new float[2];
         float userLength = userPm.getLength();
 
-        // Sample points along the user's path.
-        // Adjust step for accuracy vs. performance.
-        float sampleStep = 20f; // Sample every 20 units along the user's path
+        // Get the total length of the template path
+        PathMeasure templatePm = new PathMeasure(scaledTemplateCharacterPath, false);
+        float templateTotalLength = 0;
+        do {
+            templateTotalLength += templatePm.getLength();
+        } while (templatePm.nextContour());
 
-        if (userLength < sampleStep) { // Handle very short strokes
-            return isPointNearTemplate(lastX, lastY); // Check just the last point
+        Log.d(TAG, "checkStrokeCorrectness: User stroke length: " + userLength + ", Template total length: " + templateTotalLength);
+
+        // Check for completeness: User's stroke length must be a significant percentage of the template's length
+        if (templateTotalLength > 0 && (userLength / templateTotalLength) < COMPLETENESS_THRESHOLD) {
+            Log.d(TAG, "checkStrokeCorrectness: Stroke too short. Completeness: " + (userLength / templateTotalLength) * 100 + "%");
+            return false; // Not enough of the template was traced
         }
 
         // Check if every sampled point on the user's stroke is near the template
+        float sampleStep = 20f; // Sample every 20 units along the user's path
+
+        if (userLength < sampleStep) { // Handle very short strokes by checking just the last point
+            return isPointNearTemplate(lastX, lastY);
+        }
+
         for (float i = 0; i < userLength; i += sampleStep) {
             userPm.getPosTan(i, userCoords, null);
             if (!isPointNearTemplate(userCoords[0], userCoords[1])) {
+                Log.d(TAG, "checkStrokeCorrectness: Point (" + userCoords[0] + ", " + userCoords[1] + ") is too far from template.");
                 return false; // Found an incorrect segment
             }
         }
 
-        // Optional: Add a check for "completeness" - did the user cover enough of the template?
-        // This is more complex and might involve comparing path lengths or using a more
-        // sophisticated path comparison algorithm (e.g., Frechet distance).
-        // For now, we assume if the user's path is consistently near, it's correct.
-
-        return true; // All sampled points were correct
+        Log.d(TAG, "checkStrokeCorrectness: Stroke is correct and sufficiently complete.");
+        return true; // All sampled points were correct and length is sufficient
     }
 }
