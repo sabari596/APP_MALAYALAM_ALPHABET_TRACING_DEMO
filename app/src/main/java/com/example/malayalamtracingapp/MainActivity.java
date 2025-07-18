@@ -5,6 +5,11 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
+import android.util.Log; // Import Log for debugging
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -12,16 +17,27 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "MainActivity";
 
     private TracingView tracingView;
     private Button resetButton, prevButton, nextButton;
 
-    // List to store resource IDs of your SVG files
-    private List<Integer> malayalamCharacterSvgRawIds;
+    // Data class to hold alphabet information
+    private static class Alphabet {
+        String name;
+        List<String> strokes;
+
+        Alphabet(String name, List<String> strokes) {
+            this.name = name;
+            this.strokes = strokes;
+        }
+    }
+
+    // List to store parsed Alphabet objects
+    private List<Alphabet> malayalamAlphabets;
     private int currentCharacterIndex = 0;
 
     @Override
@@ -34,18 +50,12 @@ public class MainActivity extends AppCompatActivity {
         prevButton = findViewById(R.id.prevButton);
         nextButton = findViewById(R.id.nextButton);
 
-        // Initialize Malayalam character SVG resource IDs
-        malayalamCharacterSvgRawIds = new ArrayList<>();
-        // Add the resource IDs for your SVG files here
-        // Example: If you have malayalam_a.svg, malayalam_aa.svg, malayalam_i.svg in res/raw
-        malayalamCharacterSvgRawIds.add(R.raw.a); // Replace with your actual file names
-        malayalamCharacterSvgRawIds.add(R.raw.aa);
-        malayalamCharacterSvgRawIds.add(R.raw.e);
-        // Add all your Malayalam letter SVG resource IDs here...
+        malayalamAlphabets = new ArrayList<>();
+        loadAlphabetsFromJson(); // Load data from JSON file
 
         // Ensure there's at least one character to display
-        if (malayalamCharacterSvgRawIds.isEmpty()) {
-            Toast.makeText(this, "No Malayalam characters loaded! Please add SVG files to res/raw.", Toast.LENGTH_LONG).show();
+        if (malayalamAlphabets.isEmpty()) {
+            Toast.makeText(this, "No Malayalam characters loaded from JSON! Please check res/raw/malayalam_alphabets.json", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -76,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
         nextButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (currentCharacterIndex < malayalamCharacterSvgRawIds.size() - 1) {
+                if (currentCharacterIndex < malayalamAlphabets.size() - 1) {
                     currentCharacterIndex++;
                     loadCharacter(currentCharacterIndex);
                 } else {
@@ -87,80 +97,61 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Loads the character at the given index into the TracingView by reading its SVG content.
+     * Reads and parses alphabet data from res/raw/malayalam_alphabets.json.
+     */
+    private void loadAlphabetsFromJson() {
+        InputStream inputStream = null;
+        BufferedReader reader = null;
+        StringBuilder jsonString = new StringBuilder();
+
+        try {
+            inputStream = getResources().openRawResource(R.raw.malayalam_alphabets);
+            reader = new BufferedReader(new InputStreamReader(inputStream));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                jsonString.append(line);
+            }
+
+            JSONArray jsonArray = new JSONArray(jsonString.toString());
+            for (int i = 0; i < jsonArray.length(); i++) {
+                JSONObject alphabetObject = jsonArray.getJSONObject(i);
+                String name = alphabetObject.getString("name");
+                JSONArray strokesArray = alphabetObject.getJSONArray("strokes");
+
+                List<String> strokes = new ArrayList<>();
+                for (int j = 0; j < strokesArray.length(); j++) {
+                    strokes.add(strokesArray.getString(j));
+                }
+                malayalamAlphabets.add(new Alphabet(name, strokes));
+                Log.d(TAG, "Loaded character: " + name + " with " + strokes.size() + " strokes.");
+            }
+
+        } catch (IOException e) {
+            Log.e(TAG, "Error reading malayalam_alphabets.json", e);
+            Toast.makeText(this, "Error loading alphabet data: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing malayalam_alphabets.json", e);
+            Toast.makeText(this, "Error parsing alphabet data: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        } finally {
+            try {
+                if (reader != null) reader.close();
+                if (inputStream != null) inputStream.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Error closing streams", e);
+            }
+        }
+    }
+
+    /**
+     * Loads the character at the given index into the TracingView.
      * @param index The index of the character to load from the list.
      */
     private void loadCharacter(int index) {
-        if (index >= 0 && index < malayalamCharacterSvgRawIds.size()) {
-            int rawId = malayalamCharacterSvgRawIds.get(index);
-            String svgContent = readRawTextFile(rawId);
-            String svgPathData = extractSvgPathData(svgContent);
-
-            if (svgPathData != null && !svgPathData.isEmpty()) {
-                tracingView.setSvgPath(svgPathData);
-                Toast.makeText(this, "Loading character " + (index + 1) + " of " + malayalamCharacterSvgRawIds.size(), Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, "Failed to load SVG path data for character " + (index + 1) + ". Check SVG file format or if 'd' attribute is present.", Toast.LENGTH_LONG).show();
-                tracingView.setSvgPath(""); // Clear the view if data is invalid
-            }
+        if (index >= 0 && index < malayalamAlphabets.size()) {
+            Alphabet currentAlphabet = malayalamAlphabets.get(index);
+            tracingView.setSvgPaths(currentAlphabet.strokes); // Pass the list of strokes
+            Toast.makeText(this, "Loading " + currentAlphabet.name + " (" + (index + 1) + " of " + malayalamAlphabets.size() + ")", Toast.LENGTH_SHORT).show();
+            Log.d(TAG, "Displaying character: " + currentAlphabet.name);
         }
-    }
-
-    /**
-     * Reads the content of a raw text file (like an SVG file) into a String.
-     * @param resId The resource ID of the raw file (e.g., R.raw.my_svg_file).
-     * @return The content of the file as a String, or null if an error occurs.
-     */
-    private String readRawTextFile(int resId) {
-        InputStream inputStream = getResources().openRawResource(resId);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        try {
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n"); // Append newline to preserve structure
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null;
-        } finally {
-            try {
-                inputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Extracts all 'd' attribute values from all <path> tags in an SVG string
-     * and concatenates them into a single string.
-     *
-     * @param svgContent The full SVG XML content as a String.
-     * @return A concatenated string of all 'd' attribute values, or null if no path data found.
-     */
-    private String extractSvgPathData(String svgContent) {
-        if (svgContent == null) {
-            return null;
-        }
-        // Regex to find the 'd' attribute within any <path> tag.
-        // The `(?s)` flag enables DOTALL mode, allowing '.' to match newlines.
-        // The `g` flag for global matching is handled by the `while(matcher.find())` loop.
-        Pattern pattern = Pattern.compile("(?s)<path\\s+[^>]*?d\\s*=\\s*\"([^\"]*)\"[^>]*?>");
-        Matcher matcher = pattern.matcher(svgContent);
-
-        StringBuilder combinedPathData = new StringBuilder();
-        while (matcher.find()) {
-            // Append each found 'd' attribute value, separated by a space
-            // This allows TracingView's parser to treat them as sequential commands.
-            combinedPathData.append(matcher.group(1)).append(" ");
-        }
-
-        if (combinedPathData.length() > 0) {
-            // Remove any trailing space
-            return combinedPathData.toString().trim();
-        }
-        return null; // No 'd' attribute found in any <path> tag
     }
 }
